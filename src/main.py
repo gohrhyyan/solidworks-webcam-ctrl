@@ -1,6 +1,8 @@
 import cv2
 import mediapipe as mp
 import time
+from pinch_detector import *
+import time
 
 # initialize the video capture object from the default camera (index 0).
 # this captures live video feed from the webcam.
@@ -35,8 +37,8 @@ while True:
     # check if multiple hand landmarks are detected in the frame.
     # if true, iterate over each detected hand.
     if detection_result.multi_hand_landmarks:
-
         # loop over the hand landmarks for each hand in the detection_result.
+        detect_pinch(detection_result.multi_hand_landmarks)
         for hand_landmarks in detection_result.multi_hand_landmarks:
             # draw the hand landmarks and connections on the original BGR image.
             # mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints).

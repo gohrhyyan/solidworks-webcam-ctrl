@@ -1,20 +1,23 @@
 import argparse
 import math
 import win32com.client as win32
+import time
 
 def connect_to_solidworks():
-    try:
-        swApp = win32.Dispatch("SldWorks.Application")
-        model = swApp.ActiveDoc
-        if model is None:
-            raise Exception("No active document in SolidWorks. Please open a model.")
-        view = model.ActiveView
-        if view is None:
-            raise Exception("No active view found.")
-        return swApp, model, view
-    except Exception as e:
-        print(f"Error connecting to SolidWorks: {e}")
-        return None, None, None
+    while True:
+        try:
+            swApp = win32.Dispatch("SldWorks.Application")
+            model = swApp.ActiveDoc
+            if model is None:
+                raise Exception("No active document in SolidWorks. Please open a model.")
+            view = model.ActiveView
+            if view is None:
+                raise Exception("No active view found.")
+            return swApp, model, view
+        except Exception as e:
+            print(f"Error connecting to SolidWorks: {e} \nRetrying in 5 seconds...")
+            time.sleep(5)
+
 
 def rotate_view(model, view, x_deg, y_deg):
     x_rad = math.radians(x_deg)
@@ -67,3 +70,6 @@ def pan_view(model, view, dx, dy):
     view.Translation2 = new_trans
     
     model.GraphicsRedraw2()
+
+if __name__ == "__main__":
+    connect_to_solidworks()
