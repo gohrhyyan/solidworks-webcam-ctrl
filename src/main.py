@@ -38,7 +38,10 @@ while True:
     # if true, iterate over each detected hand.
     if detection_result.multi_hand_landmarks:
         # loop over the hand landmarks for each hand in the detection_result.
-        detect_pinch(detection_result.multi_hand_landmarks)
+
+        # detected pinches is a list of tuples (hand_id, x, y) where x,y are normalized coordinates of the index finger tip
+        detected_pinches = detect_pinch(detection_result.multi_hand_landmarks)
+
         for hand_landmarks in detection_result.multi_hand_landmarks:
             # draw the hand landmarks and connections on the original BGR image.
             # mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints).
