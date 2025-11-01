@@ -23,7 +23,7 @@ def rotate_view(model, view, x_deg, y_deg):
     x_rad = math.radians(x_deg)
     y_rad = math.radians(y_deg)
     # Use RotateAboutCenter on the view directly (IModelView method)
-    view.RotateAboutCenter(x_rad, y_rad)
+    view.RotateAboutCenter(y_rad, x_rad)
     model.GraphicsRedraw2()
 
 def zoom_view(model, view, factor):
@@ -70,6 +70,3 @@ def pan_view(model, view, dx, dy):
     view.Translation2 = new_trans
     
     model.GraphicsRedraw2()
-
-if __name__ == "__main__":
-    connect_to_solidworks()

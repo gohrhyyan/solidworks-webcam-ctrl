@@ -6,7 +6,7 @@ PINCH_THRESHOLD = 1  # Adjust this value as needed
 
 def detect_pinch(multi_hand_landmarks):
     num_pinches = 0
-    detected_pinches = []
+    pinches = {}
     for hand_id, hand_landmarks in enumerate(multi_hand_landmarks):
     # Pinch detection: Get thumb tip (4), thumb PIP (3), and index tip (8)
         thumb_tip = hand_landmarks.landmark[4]      # Thumb tip
@@ -25,9 +25,9 @@ def detect_pinch(multi_hand_landmarks):
 
         # Check for pinch (sets bool state)
         if thumb_index_tip_squared_dist < thumb_tip_pip_length_squared * PINCH_THRESHOLD:
-            detected_pinches.append((hand_id, index_tip.x, index_tip.y))
+            pinches[hand_id] = (index_tip.x, index_tip.y)
 
-    print (f"pinches detected {detected_pinches})")
-    return(detected_pinches)
+    #print (f"pinches detected {pinches})")
+    return pinches
 
-#detected pinches is a list of tuples (hand_id, x, y) where x,y are normalized coordinates of the index finger tip
+#detected pinches is a dictionary where keys are hand_ids and values are tuples (x, y) of normalized coordinates of the index finger tip
