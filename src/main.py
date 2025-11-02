@@ -5,7 +5,8 @@ from pinch_detector import *
 from sw_API import *
 import time
 
-ROTATION_SENSITIVITY = 200  # Degrees per full normalized swipe; tune 2-10
+ROTATION_SENSITIVITY = 350  # Degrees per full normalized swipe; tune 2-10
+PAN_SENSITIVITY = -0.5 
 
 def detect_movement(detected_pinches, last_frame_detected_pinches):
     # Compare current detected pinches with last frame's to determine movement
@@ -76,6 +77,16 @@ def main():
                 #print(f"Rotating: x_deg={x_deg:.2f}, y_deg={y_deg:.2f}")
                 rotate_view(model, view, x_deg, y_deg)
 
+            elif len(movements) == 2:  # Dual hands for pan
+                movements_list = list(movements.values())
+                dx1, dy1 = movements_list[0]
+                dx2, dy2 = movements_list[1]
+                avg_dx = (dx1 + dx2) / 2
+                avg_dy = (dy1 + dy2) / 2
+                dx_pix = avg_dx * PAN_SENSITIVITY
+                dy_pix = avg_dy * PAN_SENSITIVITY
+                pan_view(model, view, dx_pix, dy_pix)
+
             for hand_landmarks in detection_result.multi_hand_landmarks:
                 # draw the hand landmarks and connections on the original BGR image.
                 # mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints).
@@ -93,7 +104,7 @@ def main():
         # display the processed image in a window titled "Image".
         #cv2.imshow("Image", img)
         # wait for 1ms
-        cv2.waitKey(1)
+        cv2.waitKey(16)  # ~60 FPS
 
         last_pinches_clear_counter += 1
 
