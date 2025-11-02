@@ -5,8 +5,8 @@ from pinch_detector import *
 from sw_API import *
 import time
 
-ROTATION_SENSITIVITY = 350  # Degrees per full normalized swipe; tune 2-10
-PAN_SENSITIVITY = -0.5 
+ROTATION_SENSITIVITY = 200
+PAN_SENSITIVITY = -0.25 
 
 def detect_movement(detected_pinches, last_frame_detected_pinches):
     # Compare current detected pinches with last frame's to determine movement
@@ -27,7 +27,7 @@ def main():
     # initialize the video capture object from the default camera (index 0).
     # this captures live video feed from the webcam.
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 426)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
     # initialize MediaPipe hands solution for hand landmark detection.
@@ -96,13 +96,13 @@ def main():
                 last_pinches = pinches
                 last_pinches_clear_counter = 0
             
-            #clear after 30 frames of no pinches detected
+            #clear after 5 frames of no pinches detected
             if not pinches and last_pinches_clear_counter > 5:
                 last_pinches = {}
                 last_pinches_clear_counter = 0
             
         # display the processed image in a window titled "Image".
-        #cv2.imshow("Image", img)
+        cv2.imshow("Image", img)
         # wait for 1ms
         cv2.waitKey(16)  # ~60 FPS
 
