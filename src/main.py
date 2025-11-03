@@ -5,8 +5,10 @@ from pinch_detector import *
 from sw_API import *
 import time
 
-ROTATION_SENSITIVITY = 200
-PAN_SENSITIVITY = -0.25 
+ROTATION_SENSITIVITY = 300
+PAN_SENSITIVITY = -0.5 
+ZOOM_THRESHOLD = 0.02
+PREVIEW_ENABLED = False
 
 def detect_movement(detected_pinches, last_frame_detected_pinches):
     # Compare current detected pinches with last frame's to determine movement
@@ -24,8 +26,8 @@ def detect_movement(detected_pinches, last_frame_detected_pinches):
 def main():
     # connect to SolidWorks and get the application, model, and active view objects.
     swApp, model, view = connect_to_solidworks()
+
     # initialize the video capture object from the default camera (index 0).
-    # this captures live video feed from the webcam.
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 426)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
@@ -34,20 +36,17 @@ def main():
     hands_detector = mp.solutions.hands.Hands()
 
     # main processing loop: continuously capture and process video frames until interrupted.
-    # this loop runs indefinitely, processing each frame for hand detection and visualization.
     last_pinches = []
     last_pinches_clear_counter = 0
     while True:
-        # read a frame from the video capture.
-        # success is a boolean indicating if the frame was read successfully, img is the BGR image frame.
+
+        # read a frame from the video capture, success is a boolean indicating if the frame was read successfully, img is the BGR image frame.
         success, img = cap.read()
 
-        # convert the BGR image to RGB format, as required by MediaPipe for processing.
-        # cv2.cvtColor handles the color space conversion.
+        # convert the BGR image to RGB format, as required by MediaPipe for processing, cv2.cvtColor handles the color space conversion.
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # process the RGB image through the hands detection pipeline.
-        # detection_result contains detected hand landmarks if any are found.
+        # process the RGB image through the hands detection pipeline, detection_result contains detected hand landmarks if any are found.
         detection_result = hands_detector.process(imgRGB)
 
         # multi_hand_landmarks is a collection of detected/tracked hands, where each hand is represented
@@ -58,10 +57,8 @@ def main():
         # scale as x.
         # (Up to 21 landmarks per hand, for multi_hand_landmarks[hand_id][landmark_id].x/y/z)
 
-        # check if multiple hand landmarks are detected in the frame.
-        # if true, iterate over each detected hand.
+        # if hand landmarks are detected in the frame, iterate over each detected hand.
         if detection_result.multi_hand_landmarks:
-            # loop over the hand landmarks for each hand in the detection_result.
 
             #detected pinches is a dictionary where keys are hand_ids and values are tuples (x, y) of normalized coordinates of the index finger tip
             pinches = detect_pinch(detection_result.multi_hand_landmarks)
@@ -70,27 +67,36 @@ def main():
             if len(movements) == 1:  # Single hand for orbit
                 hand_id, (dx, dy) = next(iter(movements.items()))  # Get the only movement
                 # Simplified: Direct normalized-to-degrees scaling
-                x_deg = dx * ROTATION_SENSITIVITY
+                x_deg = dx * ROTATION_SENSITIVITY * -1
                 y_deg = dy * ROTATION_SENSITIVITY
-                # Flip X for intuitive yaw
-                x_deg = -x_deg
-                #print(f"Rotating: x_deg={x_deg:.2f}, y_deg={y_deg:.2f}")
-                rotate_view(model, view, x_deg, y_deg)
+                rotate_view(view, x_deg, y_deg)
+                model.GraphicsRedraw2()
 
-            elif len(movements) == 2:  # Dual hands for pan
-                movements_list = list(movements.values())
-                dx1, dy1 = movements_list[0]
-                dx2, dy2 = movements_list[1]
-                avg_dx = (dx1 + dx2) / 2
-                avg_dy = (dy1 + dy2) / 2
-                dx_pix = avg_dx * PAN_SENSITIVITY
-                dy_pix = avg_dy * PAN_SENSITIVITY
-                pan_view(model, view, dx_pix, dy_pix)
-
-            for hand_landmarks in detection_result.multi_hand_landmarks:
-                # draw the hand landmarks and connections on the original BGR image.
-                # mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints).
-                mp.solutions.drawing_utils.draw_landmarks(img, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
+            elif len(movements) == 2:  # Dual hands for pan and zoom
+                # Zoom based on distance change between hands
+                hand_ids = list(movements.keys())
+                x1_curr, y1_curr = pinches[hand_ids[0]]
+                x2_curr, y2_curr = pinches[hand_ids[1]]
+                x1_last, y1_last = last_pinches[hand_ids[0]]
+                x2_last, y2_last = last_pinches[hand_ids[1]]
+                curr_dist = ((x2_curr - x1_curr) ** 2 + (y2_curr - y1_curr) ** 2) ** 0.5
+                last_dist = ((x2_last - x1_last) ** 2 + (y2_last - y1_last) ** 2) ** 0.5
+                if abs(curr_dist - last_dist) > ZOOM_THRESHOLD:
+                    zoom_factor = 1 + (curr_dist - last_dist) * 5  # Scale factor for zoom sensitivity
+                    zoom_factor = max(0.5, min(1.5, zoom_factor))  # Clamp zoom factor
+                    zoom_view(view, zoom_factor)
+                    model.GraphicsRedraw2()
+                    
+                else:
+                    movements_list = list(movements.values())
+                    dx1, dy1 = movements_list[0]
+                    dx2, dy2 = movements_list[1]
+                    avg_dx = (dx1 + dx2) / 2
+                    avg_dy = (dy1 + dy2) / 2
+                    dx_pix = avg_dx * PAN_SENSITIVITY
+                    dy_pix = avg_dy * PAN_SENSITIVITY
+                    pan_view(view, dx_pix, dy_pix)
+                    model.GraphicsRedraw2()
             
             if pinches:
                 last_pinches = pinches
@@ -100,13 +106,15 @@ def main():
             if not pinches and last_pinches_clear_counter > 5:
                 last_pinches = {}
                 last_pinches_clear_counter = 0
-            
-        # display the processed image in a window titled "Image".
-        cv2.imshow("Image", img)
-        # wait for 1ms
-        cv2.waitKey(16)  # ~60 FPS
 
+        cv2.waitKey(16)  # ~60 FPS
         last_pinches_clear_counter += 1
+        
+        if PREVIEW_ENABLED:
+            for hand_landmarks in detection_result.multi_hand_landmarks:
+                # draw the hand landmarks and connections on the original BGR image. mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints). 
+                mp.solutions.drawing_utils.draw_landmarks(img, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
+            cv2.imshow("Image", img)
 
 
 if __name__ == "__main__":
