@@ -29,15 +29,18 @@ def main():
 
     # initialize the video capture object from the default camera (index 0).
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 426)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 426)
+    #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
     # initialize MediaPipe hands solution for hand landmark detection.
     hands_detector = mp.solutions.hands.Hands()
 
     # main processing loop: continuously capture and process video frames until interrupted.
-    last_pinches = []
+    last_pinches = {}
     last_pinches_clear_counter = 0
+    # NEW: State variables for persistent zoom mode
+    zoom_active = False
+    zoom_counter = 0
     while True:
 
         # read a frame from the video capture, success is a boolean indicating if the frame was read successfully, img is the BGR image frame.
@@ -49,6 +52,8 @@ def main():
         # process the RGB image through the hands detection pipeline, detection_result contains detected hand landmarks if any are found.
         detection_result = hands_detector.process(imgRGB)
 
+        # NEW: Initialize pinches outside the if-block for consistent length checks
+        pinches = {}
         # multi_hand_landmarks is a collection of detected/tracked hands, where each hand is represented
         # as a list of 21 hand landmarks and each landmark is composed of x, y, and z coordinates.
         # x and y are normalized to [0.0, 1.0] by the image width and height respectively.
@@ -73,7 +78,7 @@ def main():
                 model.GraphicsRedraw2()
 
             elif len(movements) == 2:  # Dual hands for pan and zoom
-                # Zoom based on distance change between hands
+                # Zoom based on distance change between hands (with persistence)
                 hand_ids = list(movements.keys())
                 x1_curr, y1_curr = pinches[hand_ids[0]]
                 x2_curr, y2_curr = pinches[hand_ids[1]]
@@ -81,22 +86,43 @@ def main():
                 x2_last, y2_last = last_pinches[hand_ids[1]]
                 curr_dist = ((x2_curr - x1_curr) ** 2 + (y2_curr - y1_curr) ** 2) ** 0.5
                 last_dist = ((x2_last - x1_last) ** 2 + (y2_last - y1_last) ** 2) ** 0.5
-                if abs(curr_dist - last_dist) > ZOOM_THRESHOLD:
+                delta_dist = abs(curr_dist - last_dist)
+                
+                # CHANGED: State-based logic for zoom persistence
+                if zoom_active:
+                    # Persist zoom for up to 5 frames
                     zoom_factor = 1 + (curr_dist - last_dist) * 5  # Scale factor for zoom sensitivity
                     zoom_factor = max(0.5, min(1.5, zoom_factor))  # Clamp zoom factor
                     zoom_view(view, zoom_factor)
                     model.GraphicsRedraw2()
-                    
+                    zoom_counter += 1
+                    if zoom_counter >= 10:
+                        zoom_active = False
                 else:
-                    movements_list = list(movements.values())
-                    dx1, dy1 = movements_list[0]
-                    dx2, dy2 = movements_list[1]
-                    avg_dx = (dx1 + dx2) / 2
-                    avg_dy = (dy1 + dy2) / 2
-                    dx_pix = avg_dx * PAN_SENSITIVITY
-                    dy_pix = avg_dy * PAN_SENSITIVITY
-                    pan_view(view, dx_pix, dy_pix)
-                    model.GraphicsRedraw2()
+                    if delta_dist > ZOOM_THRESHOLD:
+                        # Trigger zoom mode
+                        zoom_active = True
+                        zoom_counter = 0
+                        zoom_factor = 1 + (curr_dist - last_dist) * 5  # Scale factor for zoom sensitivity
+                        zoom_factor = max(0.5, min(1.5, zoom_factor))  # Clamp zoom factor
+                        zoom_view(view, zoom_factor)
+                        model.GraphicsRedraw2()
+                    else:
+                        # Pan only if not in zoom mode
+                        movements_list = list(movements.values())
+                        dx1, dy1 = movements_list[0]
+                        dx2, dy2 = movements_list[1]
+                        avg_dx = (dx1 + dx2) / 2
+                        avg_dy = (dy1 + dy2) / 2
+                        dx_pix = avg_dx * PAN_SENSITIVITY
+                        dy_pix = avg_dy * PAN_SENSITIVITY
+                        pan_view(view, dx_pix, dy_pix)
+                        model.GraphicsRedraw2()
+            
+            # NEW: Reset zoom state if two-hand hold is released
+            if len(pinches) < 2:
+                zoom_active = False
+                zoom_counter = 0
             
             if pinches:
                 last_pinches = pinches

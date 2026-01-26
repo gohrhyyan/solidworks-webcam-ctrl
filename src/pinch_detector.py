@@ -4,9 +4,12 @@
 # Values <1.0 decreases sensitivity (requires closer pinches); >1.0 increases it (allows looser pinches).
 PINCH_THRESHOLD = 1  # Adjust this value as needed
 
+#multi_hand_landmarks: list of hand landmarks detected by MediaPipe Hands. Structure: multi_hand_landmarks[hand_id][landmark_id].x/y/z
 def detect_pinch(multi_hand_landmarks):
     num_pinches = 0
     pinches = {}
+
+    # iterate over each detected hand 
     for hand_id, hand_landmarks in enumerate(multi_hand_landmarks):
     # Pinch detection: Get thumb tip (4), thumb PIP (3), and index tip (8)
         thumb_tip = hand_landmarks.landmark[4]      # Thumb tip
