@@ -26,15 +26,15 @@ def rotate_view(view, x_deg, y_deg):
     view.RotateAboutCenter(y_rad, x_rad)
 
 def zoom_view(view, factor):
-    if not 0.0 < factor < 2.0:
-        print("Zoom factor should be between 0.0 and 2.0")
-        return
+    #if not 0.0 < factor < 2.0:
+    #    print("Zoom factor should be between 0.0 and 2.0")
+    #   return
     # Note: SolidWorks API uses Scale2 for zoom; multiply current scale
     current_scale = view.Scale2
     view.Scale2 = current_scale * factor
 
 def pan_view(view, dx_pix, dy_pix):
-    # Simple version: Assume dx_pix, dy_pix are in model units for X (horizontal), Y (vertical) screen directions
+    # Simple version: Assume dx_pix, fy_pix are in model units for X (horizontal), Y (vertical) screen directions
     # For pixel-based, compute model delta: e.g., model_per_pixel = (visible_max_x - visible_min_x) / window_width_pixels
     # But requires getting visible box and window size (via HWND)
     view.TranslateBy(dx_pix, dy_pix)  # Translates along screen X by dx, screen Y by dy in model units

@@ -2,8 +2,6 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
-
-from pinch_detector import PINCH_THRESHOLD   # keep your constant
 from sw_API import connect_to_solidworks, rotate_view, zoom_view, pan_view
 
 # ──────────────────────────────────────────────
@@ -11,7 +9,7 @@ from sw_API import connect_to_solidworks, rotate_view, zoom_view, pan_view
 # ──────────────────────────────────────────────
 ROTATION_SENSITIVITY = 300.0
 PAN_SENSITIVITY      = -0.5
-ZOOM_THRESHOLD       = 0.02
+ZOOM_THRESHOLD       = 0.025
 
 # Legacy Hands options – big wins for speed
 MODEL_COMPLEXITY     = 0          # 0 = lite model → much faster
@@ -19,12 +17,18 @@ MAX_NUM_HANDS        = 2
 MIN_DETECTION_CONF   = 0.45
 MIN_TRACKING_CONF    = 0.45
 
-PREVIEW_ENABLED      = False
+PREVIEW_ENABLED      = True
+
+# Threshold multiplier for pinch detection: Determines the maximum allowed distance between thumb tip and index tip,
+# normalized relative to the squared length of the thumb's distal phalanx (tip to PIP joint). 
+# A value of 1.0 means the tips must be no farther apart than the thumb segment length itself for a pinch to be detected.
+# Values <1.0 decreases sensitivity (requires closer pinches); >1.0 increases it (allows looser pinches).
+PINCH_THRESHOLD = 2  # Adjust this value as needed
 
 # ──────────────────────────────────────────────
 # Landmark indices we care about
 IDX_THUMB_TIP  = 4
-IDX_THUMB_PIP  = 3
+IDX_THUMB_PIP  = 3``
 IDX_INDEX_TIP  = 8
 
 NEEDED_INDICES = [IDX_THUMB_TIP, IDX_THUMB_PIP, IDX_INDEX_TIP]
@@ -76,9 +80,7 @@ def main():
     swApp, model, view = connect_to_solidworks()
 
     cap = cv2.VideoCapture(0)
-    # Optional lower res for extra speed (uncomment & tune)
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    #cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
 
     # ── Legacy Hands solution ──
     mp_hands = mp.solutions.hands
@@ -160,8 +162,7 @@ def main():
             delta_dist = abs(curr_dist - last_dist)
 
             if zoom_active:
-                zoom_factor = 1 + (curr_dist - last_dist) * 5
-                zoom_factor = np.clip(zoom_factor, 0.5, 1.5)
+                zoom_factor = curr_dist/last_dist
                 zoom_view(view, zoom_factor)
                 model.GraphicsRedraw2()
                 zoom_counter += 1
@@ -171,8 +172,7 @@ def main():
                 if delta_dist > ZOOM_THRESHOLD:
                     zoom_active = True
                     zoom_counter = 0
-                    zoom_factor = 1 + (curr_dist - last_dist) * 5
-                    zoom_factor = np.clip(zoom_factor, 0.5, 1.5)
+                    zoom_factor = curr_dist/last_dist
                     zoom_view(view, zoom_factor)
                     model.GraphicsRedraw2()
                 else:
