@@ -1,146 +1,218 @@
 import cv2
 import mediapipe as mp
+import numpy as np
 import time
-from pinch_detector import *
-from sw_API import *
-import time
+from sw_API import connect_to_solidworks, rotate_view, zoom_view, pan_view
 
-ROTATION_SENSITIVITY = 300
-PAN_SENSITIVITY = -0.5 
-ZOOM_THRESHOLD = 0.02
-PREVIEW_ENABLED = False
+# ──────────────────────────────────────────────
+# Config / constants (tuned for speed + your logic)
+# ──────────────────────────────────────────────
+ROTATION_SENSITIVITY = 300.0
+PAN_SENSITIVITY      = -0.5
+ZOOM_THRESHOLD       = 0.025
 
-def detect_movement(detected_pinches, last_frame_detected_pinches):
-    # Compare current detected pinches with last frame's to determine movement
-    # Match by hand_id and calculate deltas
-    movements = {}
-    for hand_id, (x, y) in detected_pinches.items():
-        if hand_id in last_frame_detected_pinches:
-            last_x, last_y = last_frame_detected_pinches[hand_id]
-            dx = x - last_x
-            dy = y - last_y
-            movements[hand_id] = (dx, dy)
-    #print(f"movements detected: {movements}")
-    return movements
+# Legacy Hands options – big wins for speed
+MODEL_COMPLEXITY     = 0          # 0 = lite model → much faster
+MAX_NUM_HANDS        = 2
+MIN_DETECTION_CONF   = 0.45
+MIN_TRACKING_CONF    = 0.45
 
+PREVIEW_ENABLED      = True
+
+# Threshold multiplier for pinch detection: Determines the maximum allowed distance between thumb tip and index tip,
+# normalized relative to the squared length of the thumb's distal phalanx (tip to PIP joint). 
+# A value of 1.0 means the tips must be no farther apart than the thumb segment length itself for a pinch to be detected.
+# Values <1.0 decreases sensitivity (requires closer pinches); >1.0 increases it (allows looser pinches).
+PINCH_THRESHOLD = 1.5  # Adjust this value as needed
+
+# ──────────────────────────────────────────────
+# Landmark indices we care about
+IDX_THUMB_TIP  = 4
+IDX_THUMB_PIP  = 3
+IDX_INDEX_TIP  = 8
+
+NEEDED_INDICES = [IDX_THUMB_TIP, IDX_THUMB_PIP, IDX_INDEX_TIP]
+
+
+def extract_key_landmarks(multi_hand_landmarks):
+    """Return (n_hands × 3 × 2) array: [hand, point, xy] normalized"""
+    if not multi_hand_landmarks:
+        return np.empty((0, 3, 2), dtype=np.float32)
+
+    arr = np.array([
+        np.array([[lm.x, lm.y] for lm in hand_landmarks.landmark])[NEEDED_INDICES]
+        for hand_landmarks in multi_hand_landmarks
+    ])  # shape → (n_hands, 3, 2)
+
+    return arr
+
+
+def detect_pinches_vectorized(key_points):
+    """
+    key_points : (n_hands, 3, 2)  [thumb_tip, thumb_pip, index_tip]
+    Returns dict {hand_id: (x,y)} of index tip when pinch detected
+    """
+    if key_points.shape[0] == 0:
+        return {}
+
+    thumb_tip   = key_points[:, 0]     # (n,2)
+    thumb_pip   = key_points[:, 1]
+    index_tip   = key_points[:, 2]
+
+    # squared length thumb segment
+    thumb_len_sq = np.sum((thumb_tip - thumb_pip)**2, axis=1)   # (n,)
+
+    # squared dist thumb_tip ↔ index_tip
+    dist_sq = np.sum((index_tip - thumb_tip)**2, axis=1)        # (n,)
+
+    is_pinch = dist_sq < thumb_len_sq * PINCH_THRESHOLD
+
+    pinches = {}
+    for i in np.flatnonzero(is_pinch):
+        x, y = index_tip[i]
+        pinches[i] = (x, y)   # hand_id = index in this frame's list
+
+    return pinches
+
+
+# ──────────────────────────────────────────────
 def main():
-    # connect to SolidWorks and get the application, model, and active view objects.
     swApp, model, view = connect_to_solidworks()
 
-    # initialize the video capture object from the default camera (index 0).
     cap = cv2.VideoCapture(0)
-    #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 426)
-    #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    #cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
 
-    # initialize MediaPipe hands solution for hand landmark detection.
-    hands_detector = mp.solutions.hands.Hands()
+    # ── Legacy Hands solution ──
+    mp_hands = mp.solutions.hands
 
-    # main processing loop: continuously capture and process video frames until interrupted.
+    hands_detector = mp_hands.Hands(
+        static_image_mode=False,                # video stream → use tracking
+        max_num_hands=MAX_NUM_HANDS,
+        #model_complexity=MODEL_COMPLEXITY,      # 0 = lite → fastest
+        min_detection_confidence=MIN_DETECTION_CONF,
+        min_tracking_confidence=MIN_TRACKING_CONF
+    )
+
+    drawing_utils = mp.solutions.drawing_utils   # only used if preview on
+
     last_pinches = {}
     last_pinches_clear_counter = 0
-    # NEW: State variables for persistent zoom mode
-    zoom_active = False
+
+    zoom_active  = False
     zoom_counter = 0
+
     while True:
-
-        # read a frame from the video capture, success is a boolean indicating if the frame was read successfully, img is the BGR image frame.
         success, img = cap.read()
+        if not success:
+            break
 
-        # convert the BGR image to RGB format, as required by MediaPipe for processing, cv2.cvtColor handles the color space conversion.
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # process the RGB image through the hands detection pipeline, detection_result contains detected hand landmarks if any are found.
-        detection_result = hands_detector.process(imgRGB)
+        # ── Process with legacy API ──
+        results = hands_detector.process(imgRGB)
 
-        # NEW: Initialize pinches outside the if-block for consistent length checks
-        pinches = {}
-        # multi_hand_landmarks is a collection of detected/tracked hands, where each hand is represented
-        # as a list of 21 hand landmarks and each landmark is composed of x, y, and z coordinates.
-        # x and y are normalized to [0.0, 1.0] by the image width and height respectively.
-        # z represents the landmark depth with the depth at the wrist being the origin, and the smaller
-        # the value the closer the landmark is to the camera. The magnitude of z uses roughly the same
-        # scale as x.
-        # (Up to 21 landmarks per hand, for multi_hand_landmarks[hand_id][landmark_id].x/y/z)
-
-        # if hand landmarks are detected in the frame, iterate over each detected hand.
-        if detection_result.multi_hand_landmarks:
-
-            #detected pinches is a dictionary where keys are hand_ids and values are tuples (x, y) of normalized coordinates of the index finger tip
-            pinches = detect_pinch(detection_result.multi_hand_landmarks)
-            movements = detect_movement(pinches, last_pinches)
-
-            if len(movements) == 1:  # Single hand for orbit
-                hand_id, (dx, dy) = next(iter(movements.items()))  # Get the only movement
-                # Simplified: Direct normalized-to-degrees scaling
-                x_deg = dx * ROTATION_SENSITIVITY * -1
-                y_deg = dy * ROTATION_SENSITIVITY
-                rotate_view(view, x_deg, y_deg)
-                model.GraphicsRedraw2()
-
-            elif len(movements) == 2:  # Dual hands for pan and zoom
-                # Zoom based on distance change between hands (with persistence)
-                hand_ids = list(movements.keys())
-                x1_curr, y1_curr = pinches[hand_ids[0]]
-                x2_curr, y2_curr = pinches[hand_ids[1]]
-                x1_last, y1_last = last_pinches[hand_ids[0]]
-                x2_last, y2_last = last_pinches[hand_ids[1]]
-                curr_dist = ((x2_curr - x1_curr) ** 2 + (y2_curr - y1_curr) ** 2) ** 0.5
-                last_dist = ((x2_last - x1_last) ** 2 + (y2_last - y1_last) ** 2) ** 0.5
-                delta_dist = abs(curr_dist - last_dist)
-                
-                # CHANGED: State-based logic for zoom persistence
-                if zoom_active:
-                    # Persist zoom for up to 5 frames
-                    zoom_factor = 1 + (curr_dist - last_dist) * 5  # Scale factor for zoom sensitivity
-                    zoom_factor = max(0.5, min(1.5, zoom_factor))  # Clamp zoom factor
-                    zoom_view(view, zoom_factor)
-                    model.GraphicsRedraw2()
-                    zoom_counter += 1
-                    if zoom_counter >= 10:
-                        zoom_active = False
-                else:
-                    if delta_dist > ZOOM_THRESHOLD:
-                        # Trigger zoom mode
-                        zoom_active = True
-                        zoom_counter = 0
-                        zoom_factor = 1 + (curr_dist - last_dist) * 5  # Scale factor for zoom sensitivity
-                        zoom_factor = max(0.5, min(1.5, zoom_factor))  # Clamp zoom factor
-                        zoom_view(view, zoom_factor)
-                        model.GraphicsRedraw2()
-                    else:
-                        # Pan only if not in zoom mode
-                        movements_list = list(movements.values())
-                        dx1, dy1 = movements_list[0]
-                        dx2, dy2 = movements_list[1]
-                        avg_dx = (dx1 + dx2) / 2
-                        avg_dy = (dy1 + dy2) / 2
-                        dx_pix = avg_dx * PAN_SENSITIVITY
-                        dy_pix = avg_dy * PAN_SENSITIVITY
-                        pan_view(view, dx_pix, dy_pix)
-                        model.GraphicsRedraw2()
-            
-            # NEW: Reset zoom state if two-hand hold is released
-            if len(pinches) < 2:
-                zoom_active = False
-                zoom_counter = 0
-            
-            if pinches:
-                last_pinches = pinches
-                last_pinches_clear_counter = 0
-            
-            #clear after 5 frames of no pinches detected
-            if not pinches and last_pinches_clear_counter > 5:
+        # ── Early exit if no hands ──
+        if not results.multi_hand_landmarks:
+            last_pinches_clear_counter += 1
+            if last_pinches_clear_counter > 5:
                 last_pinches = {}
                 last_pinches_clear_counter = 0
 
-        cv2.waitKey(16)  # ~60 FPS
-        last_pinches_clear_counter += 1
-        
+            zoom_active = False
+            zoom_counter = 0
+
+            if PREVIEW_ENABLED:
+                cv2.imshow("Image", img)
+            cv2.waitKey(1)
+            continue
+
+        # ── Extract only needed landmarks ──
+        key_points = extract_key_landmarks(results.multi_hand_landmarks)
+
+        pinches = detect_pinches_vectorized(key_points)
+
+        # ── Compute movements (only for pinched hands that existed last frame) ──
+        movements = {}
+        for hid, (x, y) in pinches.items():
+            if hid in last_pinches:
+                lx, ly = last_pinches[hid]
+                movements[hid] = (x - lx, y - ly)
+
+        n_mov = len(movements)
+
+        if n_mov == 1:
+            # ── Single hand orbit ──
+            dx, dy = next(iter(movements.values()))
+            x_deg = dx * ROTATION_SENSITIVITY * -1
+            y_deg = dy * ROTATION_SENSITIVITY
+            rotate_view(view, x_deg, y_deg)
+            model.GraphicsRedraw2()
+
+        elif n_mov >= 2:
+            # ── Dual-hand pan/zoom ──
+            hand_ids = list(pinches.keys())[:2]  # take first two
+            p1 = np.array(pinches[hand_ids[0]])
+            p2 = np.array(pinches[hand_ids[1]])
+
+            p1_last = np.array(last_pinches[hand_ids[0]])
+            p2_last = np.array(last_pinches[hand_ids[1]])
+
+            curr_dist = np.linalg.norm(p2 - p1)
+            last_dist = np.linalg.norm(p2_last - p1_last)
+            delta_dist = abs(curr_dist - last_dist)
+
+            if zoom_active:
+                zoom_factor = curr_dist/last_dist
+                zoom_view(view, zoom_factor)
+                model.GraphicsRedraw2()
+                zoom_counter += 1
+                if zoom_counter >= 10:
+                    zoom_active = False
+            else:
+                if delta_dist > ZOOM_THRESHOLD:
+                    zoom_active = True
+                    zoom_counter = 0
+                    zoom_factor = curr_dist/last_dist
+                    zoom_view(view, zoom_factor)
+                    model.GraphicsRedraw2()
+                else:
+                    # Pan: average delta
+                    m1 = np.array(movements[hand_ids[0]])
+                    m2 = np.array(movements[hand_ids[1]])
+                    avg_m = (m1 + m2) / 2
+                    dx_pix = avg_m[0] * PAN_SENSITIVITY
+                    dy_pix = avg_m[1] * PAN_SENSITIVITY
+                    pan_view(view, dx_pix, dy_pix)
+                    model.GraphicsRedraw2()
+
+        # ── State updates ──
+        if len(pinches) < 2:
+            zoom_active = False
+            zoom_counter = 0
+
+        if pinches:
+            last_pinches = pinches.copy()
+            last_pinches_clear_counter = 0
+        else:
+            last_pinches_clear_counter += 1
+            if last_pinches_clear_counter > 5:
+                last_pinches = {}
+                last_pinches_clear_counter = 0
+
+        # ── Optional minimal preview ──
         if PREVIEW_ENABLED:
-            for hand_landmarks in detection_result.multi_hand_landmarks:
-                # draw the hand landmarks and connections on the original BGR image. mpHands.HAND_CONNECTIONS defines the lines between landmarks (e.g., finger joints). 
-                mp.solutions.drawing_utils.draw_landmarks(img, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
+            for hand_lm in results.multi_hand_landmarks:
+                drawing_utils.draw_landmarks(
+                    img, hand_lm, mp_hands.HAND_CONNECTIONS,
+                    landmark_drawing_spec=None  # skip dots for speed
+                )
             cv2.imshow("Image", img)
+
+        cv2.waitKey(1)  # non-blocking
+
+    cap.release()
+    if PREVIEW_ENABLED:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
