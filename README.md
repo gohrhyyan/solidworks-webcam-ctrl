@@ -1,5 +1,3 @@
-A lightweight, webcam-powered Python script that enables enables engineers to manipulate 3D models using natural gestures via their laptop's front-facing webcam.
-
 By leveraging MediaPipe's real-time hand tracking and the pySW library (a Python wrapper for the SolidWorks COM API). The MVP focuses on core viewport navigation—orbits, pans, and zooms—without the need for a compiled .NET add-in or inter-process communication. Everything runs in a single Python process for minimal latency and easy setup.
 
 User Interaction Flow
@@ -14,6 +12,5 @@ Activation: When two hands are detected and both perform a pinch gesture, enter 
 Translation (Parallel Move): Keep hands pinched at consistent width and move them together in unison—horizontal/vertical/diagonal drags pan the entire viewport (model slides without rotating). Ideal for recentering on a sub-assembly. 
 Adjusts based on average hand speed for smooth tracking. 
 
-WIP
 Zoom (Scale)
 Zoom (Spread/Contract): While two hands are pinched, vary hand width—spread apart to zoom in (enlarges details), contract together to zoom out (model shrinks, revealing context). Width change rate dictates speed: slow spread for gradual reveal, fast for quick overviews. 
