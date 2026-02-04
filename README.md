@@ -16,4 +16,4 @@ Adjusts based on average hand speed for smooth tracking.
 
 WIP
 Zoom (Scale)
-Zoom (Spread/Contract): While pinched, vary hand width—spread apart to zoom in (enlarges details), contract together to zoom out (model shrinks, revealing context). Width change rate dictates speed: slow spread for gradual reveal, fast for quick overviews. 
+Zoom (Spread/Contract): While two hands are pinched, vary hand width—spread apart to zoom in (enlarges details), contract together to zoom out (model shrinks, revealing context). Width change rate dictates speed: slow spread for gradual reveal, fast for quick overviews. 
