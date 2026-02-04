@@ -23,12 +23,12 @@ PREVIEW_ENABLED      = True
 # normalized relative to the squared length of the thumb's distal phalanx (tip to PIP joint). 
 # A value of 1.0 means the tips must be no farther apart than the thumb segment length itself for a pinch to be detected.
 # Values <1.0 decreases sensitivity (requires closer pinches); >1.0 increases it (allows looser pinches).
-PINCH_THRESHOLD = 2  # Adjust this value as needed
+PINCH_THRESHOLD = 1.5  # Adjust this value as needed
 
 # ──────────────────────────────────────────────
 # Landmark indices we care about
 IDX_THUMB_TIP  = 4
-IDX_THUMB_PIP  = 3``
+IDX_THUMB_PIP  = 3
 IDX_INDEX_TIP  = 8
 
 NEEDED_INDICES = [IDX_THUMB_TIP, IDX_THUMB_PIP, IDX_INDEX_TIP]
@@ -88,7 +88,7 @@ def main():
     hands_detector = mp_hands.Hands(
         static_image_mode=False,                # video stream → use tracking
         max_num_hands=MAX_NUM_HANDS,
-        model_complexity=MODEL_COMPLEXITY,      # 0 = lite → fastest
+        #model_complexity=MODEL_COMPLEXITY,      # 0 = lite → fastest
         min_detection_confidence=MIN_DETECTION_CONF,
         min_tracking_confidence=MIN_TRACKING_CONF
     )
